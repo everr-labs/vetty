@@ -350,9 +350,9 @@ class AppDelegate: NSObject,
             // is possible to have other windows in a few scenarios:
             //   - if we're opening a URL since `application(_:openFile:)` is called before this.
             //   - if we're restoring from persisted state
-            if TerminalController.all.isEmpty && derivedConfig.initialWindow {
+            if TerminalController.all.isEmpty && VettyWorkspaceWindowController.all.isEmpty && derivedConfig.initialWindow {
                 undoManager.disableUndoRegistration()
-                _ = TerminalController.newWindow(ghostty)
+                _ = VettyWorkspaceWindowController.newWindow(ghostty)
                 undoManager.enableUndoRegistration()
             }
         }
@@ -438,7 +438,7 @@ class AppDelegate: NSObject,
         // This is possible with flag set to false if there a race where the
         // window is still initializing and is not visible but the user clicked
         // the dock icon.
-        guard TerminalController.all.isEmpty else { return true }
+        guard TerminalController.all.isEmpty && VettyWorkspaceWindowController.all.isEmpty else { return true }
 
         // If the application isn't active yet then we don't want to process
         // this because we're not ready. This happens sometimes in Xcode runs
@@ -446,7 +446,7 @@ class AppDelegate: NSObject,
         guard applicationHasBecomeActive else { return true }
 
         // No visible windows, open a new one.
-        _ = TerminalController.newWindow(ghostty)
+        _ = VettyWorkspaceWindowController.newWindow(ghostty)
         return false
     }
 
@@ -514,12 +514,12 @@ class AppDelegate: NSObject,
 
         switch ghostty.config.macosDockDropBehavior {
         case .new_tab:
-            _ = TerminalController.newTab(
-                ghostty,
-                from: TerminalController.preferredParent?.window,
-                withBaseConfig: config
-            )
-        case .new_window: _ = TerminalController.newWindow(ghostty, withBaseConfig: config)
+            if let controller = VettyWorkspaceWindowController.preferred {
+                controller.addTabToSelectedGroup(withBaseConfig: config)
+            } else {
+                _ = VettyWorkspaceWindowController.newWindow(ghostty)
+            }
+        case .new_window: _ = VettyWorkspaceWindowController.newWindow(ghostty)
         }
 
         return true
@@ -721,21 +721,23 @@ class AppDelegate: NSObject,
     }
 
     @objc private func ghosttyNewWindow(_ notification: Notification) {
-        let configAny = notification.userInfo?[Ghostty.Notification.NewSurfaceConfigKey]
-        let config = configAny as? Ghostty.SurfaceConfiguration
-        _ = TerminalController.newWindow(ghostty, withBaseConfig: config)
+        _ = VettyWorkspaceWindowController.newWindow(ghostty)
     }
 
     @objc private func ghosttyNewTab(_ notification: Notification) {
         guard let surfaceView = notification.object as? Ghostty.SurfaceView else { return }
         guard let window = surfaceView.window else { return }
+        let configAny = notification.userInfo?[Ghostty.Notification.NewSurfaceConfigKey]
+        let config = configAny as? Ghostty.SurfaceConfiguration
+
+        if let controller = window.windowController as? VettyWorkspaceWindowController {
+            controller.addTabToSelectedGroup(withBaseConfig: config)
+            return
+        }
 
         // We only want to listen to new tabs if the focused parent is
         // a regular terminal controller.
         guard window.windowController is TerminalController else { return }
-
-        let configAny = notification.userInfo?[Ghostty.Notification.NewSurfaceConfigKey]
-        let config = configAny as? Ghostty.SurfaceConfiguration
 
         _ = TerminalController.newTab(ghostty, from: window, withBaseConfig: config)
     }
@@ -952,14 +954,15 @@ class AppDelegate: NSObject,
     }
 
     @IBAction func newWindow(_ sender: Any?) {
-        _ = TerminalController.newWindow(ghostty)
+        _ = VettyWorkspaceWindowController.newWindow(ghostty)
     }
 
     @IBAction func newTab(_ sender: Any?) {
-        _ = TerminalController.newTab(
-            ghostty,
-            from: TerminalController.preferredParent?.window
-        )
+        if let controller = VettyWorkspaceWindowController.preferred {
+            controller.addTabToSelectedGroup()
+        } else {
+            _ = VettyWorkspaceWindowController.newWindow(ghostty)
+        }
     }
 
     @IBAction func closeAllWindows(_ sender: Any?) {

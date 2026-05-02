@@ -268,6 +268,10 @@ struct VettyWorkspaceStore: Sendable {
     }
 
     func load() async throws -> VettyWorkspace {
+        try loadSync()
+    }
+
+    func loadSync() throws -> VettyWorkspace {
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
             return .default()
         }
@@ -277,6 +281,10 @@ struct VettyWorkspaceStore: Sendable {
     }
 
     func save(_ workspace: VettyWorkspace) async throws {
+        try saveSync(workspace)
+    }
+
+    func saveSync(_ workspace: VettyWorkspace) throws {
         let directory = fileURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let data = try Self.encoder.encode(workspace)
