@@ -37,6 +37,11 @@ struct VettyWorkspace: Codable, Equatable, Sendable {
     }
 
     @discardableResult
+    mutating func addPlaceholderGroup() -> UUID {
+        addGroup(named: "Group \(groups.count + 1)")
+    }
+
+    @discardableResult
     mutating func addTab(
         named name: String,
         workingDirectory: String,
@@ -66,6 +71,62 @@ struct VettyWorkspace: Codable, Equatable, Sendable {
             }
         }
         return nil
+    }
+
+    mutating func renameGroup(_ groupID: UUID, to name: String) throws {
+        guard let groupIndex = groups.firstIndex(where: { $0.id == groupID }) else {
+            throw VettyWorkspaceError.groupNotFound(groupID)
+        }
+
+        groups[groupIndex].name = name
+    }
+
+    mutating func renameTab(_ tabID: UUID, to name: String) throws {
+        guard let location = tabLocation(for: tabID) else {
+            throw VettyWorkspaceError.tabNotFound(tabID)
+        }
+
+        groups[location.groupIndex].tabs[location.tabIndex].name = name
+    }
+
+    mutating func setTabTitleOverride(_ tabID: UUID, to override: String?) throws {
+        guard let location = tabLocation(for: tabID) else {
+            throw VettyWorkspaceError.tabNotFound(tabID)
+        }
+
+        let normalized = override?.trimmingCharacters(in: .whitespacesAndNewlines)
+        groups[location.groupIndex].tabs[location.tabIndex].titleOverride =
+            (normalized?.isEmpty == false) ? normalized : nil
+    }
+
+    mutating func removeGroup(_ groupID: UUID) throws {
+        guard let groupIndex = groups.firstIndex(where: { $0.id == groupID }) else {
+            throw VettyWorkspaceError.groupNotFound(groupID)
+        }
+
+        let removedGroup = groups.remove(at: groupIndex)
+        let removedSelectedTab = selectedTabID.map { selectedTabID in
+            removedGroup.tabs.contains { $0.id == selectedTabID }
+        } ?? false
+
+        if selectedGroupID == groupID || removedSelectedTab || selectedGroupID == nil {
+            selectGroupAfterRemoval(preferredIndex: groupIndex)
+        }
+    }
+
+    mutating func removeTab(_ tabID: UUID) throws {
+        guard let location = tabLocation(for: tabID) else {
+            throw VettyWorkspaceError.tabNotFound(tabID)
+        }
+
+        groups[location.groupIndex].tabs.remove(at: location.tabIndex)
+
+        if selectedTabID == tabID {
+            selectTabAfterRemoval(
+                groupIndex: location.groupIndex,
+                preferredTabIndex: location.tabIndex
+            )
+        }
     }
 
     @discardableResult
@@ -99,6 +160,46 @@ struct VettyWorkspace: Codable, Equatable, Sendable {
 
         throw VettyWorkspaceError.tabNotFound(tabID)
     }
+
+    private func tabLocation(for tabID: UUID) -> (groupIndex: Int, tabIndex: Int)? {
+        for groupIndex in groups.indices {
+            if let tabIndex = groups[groupIndex].tabs.firstIndex(where: { $0.id == tabID }) {
+                return (groupIndex, tabIndex)
+            }
+        }
+
+        return nil
+    }
+
+    private mutating func selectGroupAfterRemoval(preferredIndex: Int) {
+        guard !groups.isEmpty else {
+            selectedGroupID = nil
+            selectedTabID = nil
+            return
+        }
+
+        let groupIndex = min(preferredIndex, groups.count - 1)
+        selectedGroupID = groups[groupIndex].id
+        selectedTabID = groups[groupIndex].tabs.first?.id
+    }
+
+    private mutating func selectTabAfterRemoval(groupIndex: Int, preferredTabIndex: Int) {
+        guard groups.indices.contains(groupIndex) else {
+            selectedGroupID = groups.first?.id
+            selectedTabID = groups.first?.tabs.first?.id
+            return
+        }
+
+        selectedGroupID = groups[groupIndex].id
+
+        guard !groups[groupIndex].tabs.isEmpty else {
+            selectedTabID = nil
+            return
+        }
+
+        let tabIndex = min(preferredTabIndex, groups[groupIndex].tabs.count - 1)
+        selectedTabID = groups[groupIndex].tabs[tabIndex].id
+    }
 }
 
 struct VettyWorkspaceGroup: Codable, Equatable, Identifiable, Sendable {
@@ -116,19 +217,35 @@ struct VettyWorkspaceGroup: Codable, Equatable, Identifiable, Sendable {
 struct VettyWorkspaceTab: Codable, Equatable, Identifiable, Sendable {
     var id: UUID
     var name: String
+    var titleOverride: String?
     var workingDirectory: String
     var paneTree: VettyPaneTree
 
     init(
         id: UUID = UUID(),
         name: String,
+        titleOverride: String? = nil,
         workingDirectory: String,
         paneTree: VettyPaneTree
     ) {
         self.id = id
         self.name = name
+        self.titleOverride = titleOverride
         self.workingDirectory = workingDirectory
         self.paneTree = paneTree
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, titleOverride, workingDirectory, paneTree
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try c.decode(UUID.self, forKey: .id)
+        self.name = try c.decode(String.self, forKey: .name)
+        self.titleOverride = try c.decodeIfPresent(String.self, forKey: .titleOverride)
+        self.workingDirectory = try c.decode(String.self, forKey: .workingDirectory)
+        self.paneTree = try c.decode(VettyPaneTree.self, forKey: .paneTree)
     }
 }
 

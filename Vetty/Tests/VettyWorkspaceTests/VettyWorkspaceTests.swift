@@ -90,4 +90,80 @@ struct VettyWorkspaceTests {
 
         #expect(loaded == workspace)
     }
+
+    @Test
+    func addingPlaceholderGroupUsesNextGroupNameAndSelectsIt() throws {
+        var workspace = VettyWorkspace.default(workingDirectory: "/Users/dev/project")
+
+        let groupID = workspace.addPlaceholderGroup()
+
+        #expect(workspace.groups.map(\.name) == ["General", "Group 2"])
+        #expect(workspace.groups[1].id == groupID)
+        #expect(workspace.groups[1].tabs.isEmpty)
+        #expect(workspace.selectedGroupID == groupID)
+        #expect(workspace.selectedTabID == nil)
+    }
+
+    @Test
+    func removingSelectedTabSelectsNeighborAndRemovesEntry() throws {
+        var workspace = VettyWorkspace.default(workingDirectory: "/Users/dev/first")
+        let groupID = try #require(workspace.selectedGroupID)
+        let firstTabID = try #require(workspace.selectedTabID)
+        let secondTabID = try workspace.addTab(
+            named: "Second",
+            workingDirectory: "/Users/dev/second",
+            toGroup: groupID
+        )
+
+        try workspace.removeTab(firstTabID)
+
+        #expect(workspace.groups[0].tabs.map(\.id) == [secondTabID])
+        #expect(workspace.selectedGroupID == groupID)
+        #expect(workspace.selectedTabID == secondTabID)
+    }
+
+    @Test
+    func removingLastTabLeavesGroupSelectedWithoutSelectedTab() throws {
+        var workspace = VettyWorkspace.default(workingDirectory: "/Users/dev/project")
+        let groupID = try #require(workspace.selectedGroupID)
+        let tabID = try #require(workspace.selectedTabID)
+
+        try workspace.removeTab(tabID)
+
+        #expect(workspace.groups[0].tabs.isEmpty)
+        #expect(workspace.selectedGroupID == groupID)
+        #expect(workspace.selectedTabID == nil)
+    }
+
+    @Test
+    func renamingTabsAndGroupsUpdatesWorkspaceNames() throws {
+        var workspace = VettyWorkspace.default(workingDirectory: "/Users/dev/project")
+        let groupID = try #require(workspace.selectedGroupID)
+        let tabID = try #require(workspace.selectedTabID)
+
+        try workspace.renameGroup(groupID, to: "Work")
+        try workspace.renameTab(tabID, to: "Build")
+
+        #expect(workspace.groups[0].name == "Work")
+        #expect(workspace.groups[0].tabs[0].name == "Build")
+    }
+
+    @Test
+    func removingSelectedGroupSelectsRemainingGroup() throws {
+        var workspace = VettyWorkspace.default(workingDirectory: "/Users/dev/general")
+        let generalGroupID = try #require(workspace.selectedGroupID)
+        let workGroupID = workspace.addGroup(named: "Work")
+        let workTabID = try workspace.addTab(
+            named: "API",
+            workingDirectory: "/Users/dev/api",
+            toGroup: workGroupID
+        )
+
+        try workspace.removeGroup(workGroupID)
+
+        #expect(workspace.groups.map(\.id) == [generalGroupID])
+        #expect(workspace.selectedGroupID == generalGroupID)
+        #expect(workspace.selectedTabID == workspace.groups[0].tabs[0].id)
+        #expect(workspace.selectedTabID != workTabID)
+    }
 }
