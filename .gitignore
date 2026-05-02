@@ -1,0 +1,12 @@
+ghostty/
+
+# macOS and Xcode local files
+.DS_Store
+DerivedData/
+*.xcuserstate
+xcuserdata/
+
+# Build outputs
+.build/
+build/
+
