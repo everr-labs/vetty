@@ -67,6 +67,8 @@ The selected tab's pane tree fills the main terminal area.
 
 Vetty is a Ghostty-derived macOS app with a new workspace model.
 
+For version 1, Vetty uses Ghostty's macOS `GhosttyKit.xcframework` as the libghostty-backed terminal layer. This is different from using only `libghostty-vt`: `libghostty-vt` provides terminal state, while `GhosttyKit` is the fuller macOS app-facing layer that includes the terminal surface, shell/PTY behavior, rendering, and input plumbing Ghostty already uses.
+
 Ghostty-derived code handles terminal behavior. Vetty-owned code handles organization.
 
 ```text

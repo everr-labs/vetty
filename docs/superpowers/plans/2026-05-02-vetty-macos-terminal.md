@@ -4,7 +4,7 @@
 
 **Goal:** Build Vetty, a native macOS terminal app derived from Ghostty's macOS terminal stack, with a Codex-like sidebar for manual groups and grouped terminal tabs.
 
-**Architecture:** Vetty owns workspace organization: windows, groups, tabs, pane trees, selection, commands, and persistence. Ghostty-derived code owns terminal behavior: shell/PTY lifecycle, rendering, input, search, settings, command palette, and macOS integrations. The ignored local `ghostty/` clone is reference-only; build-time Ghostty code lives in Vetty-owned paths.
+**Architecture:** Vetty owns workspace organization: windows, groups, tabs, pane trees, selection, commands, and persistence. Ghostty-derived code owns terminal behavior: shell/PTY lifecycle, rendering, input, search, settings, command palette, and macOS integrations. For v1, Vetty uses Ghostty's macOS `GhosttyKit.xcframework` as the libghostty-backed terminal layer instead of directly embedding only `libghostty-vt`. The ignored local `ghostty/` clone is reference-only; build-time Ghostty code lives in Vetty-owned paths.
 
 **Tech Stack:** Swift, SwiftUI, AppKit, XCTest, Xcode project, Ghostty-derived Swift/macOS code, Ghostty core built as `GhosttyKit.xcframework` through Zig.
 
