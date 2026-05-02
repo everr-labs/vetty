@@ -1,4 +1,4 @@
-ghostty/
+/ghostty/
 
 # macOS and Xcode local files
 .DS_Store
@@ -7,8 +7,8 @@ DerivedData/
 xcuserdata/
 
 # Build outputs
-.build/
-build/
+/.build/
+/build/
 Vetty/build/
 Vetty/Frameworks/GhosttyKit.xcframework/
 Vendor/GhosttySource/zig-out/

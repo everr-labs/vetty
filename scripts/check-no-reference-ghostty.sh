@@ -11,7 +11,8 @@ fi
 paths=()
 [[ -d "$root/Vetty" ]] && paths+=("$root/Vetty")
 [[ -d "$root/Vetty.xcodeproj" ]] && paths+=("$root/Vetty.xcodeproj")
-[[ -d "$root/Vendor" ]] && paths+=("$root/Vendor")
+[[ -f "$root/scripts/build-vetty.sh" ]] && paths+=("$root/scripts/build-vetty.sh")
+[[ -f "$root/scripts/build-ghostty-kit.sh" ]] && paths+=("$root/scripts/build-ghostty-kit.sh")
 [[ -f "$root/Package.swift" ]] && paths+=("$root/Package.swift")
 
 if (( ${#paths[@]} > 0 )); then

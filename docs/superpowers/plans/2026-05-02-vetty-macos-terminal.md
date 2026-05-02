@@ -101,7 +101,8 @@ fi
 paths=()
 [[ -d "$root/Vetty" ]] && paths+=("$root/Vetty")
 [[ -d "$root/Vetty.xcodeproj" ]] && paths+=("$root/Vetty.xcodeproj")
-[[ -d "$root/Vendor" ]] && paths+=("$root/Vendor")
+[[ -f "$root/scripts/build-vetty.sh" ]] && paths+=("$root/scripts/build-vetty.sh")
+[[ -f "$root/scripts/build-ghostty-kit.sh" ]] && paths+=("$root/scripts/build-ghostty-kit.sh")
 [[ -f "$root/Package.swift" ]] && paths+=("$root/Package.swift")
 
 if (( ${#paths[@]} > 0 )); then
@@ -131,7 +132,7 @@ Expected now: PASS with `No build-time references to local ghostty/ clone found.
 Update `.gitignore`:
 
 ```gitignore
-ghostty/
+/ghostty/
 
 # macOS and Xcode local files
 .DS_Store
@@ -140,8 +141,8 @@ DerivedData/
 xcuserdata/
 
 # Build outputs
-.build/
-build/
+/.build/
+/build/
 Vetty/build/
 Vetty/Frameworks/GhosttyKit.xcframework/
 Vendor/GhosttySource/zig-out/
