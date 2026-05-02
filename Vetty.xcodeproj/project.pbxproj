@@ -780,6 +780,7 @@
 				MARKETING_VERSION = 0.1;
 				"OTHER_LDFLAGS[arch=*]" = "-lstdc++";
 				PRODUCT_BUNDLE_IDENTIFIER = com.guidodorsi.vetty;
+				PRODUCT_MODULE_NAME = Ghostty;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_OBJC_BRIDGING_HEADER = Vetty/Sources/App/ghostty-bridging-header.h;
@@ -1177,6 +1178,7 @@
 				MARKETING_VERSION = 0.1;
 				"OTHER_LDFLAGS[arch=*]" = "-lstdc++";
 				PRODUCT_BUNDLE_IDENTIFIER = com.guidodorsi.vetty.debug;
+				PRODUCT_MODULE_NAME = Ghostty;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_OBJC_BRIDGING_HEADER = Vetty/Sources/App/ghostty-bridging-header.h;
@@ -1232,6 +1234,7 @@
 				MARKETING_VERSION = 0.1;
 				"OTHER_LDFLAGS[arch=*]" = "-lstdc++";
 				PRODUCT_BUNDLE_IDENTIFIER = com.guidodorsi.vetty;
+				PRODUCT_MODULE_NAME = Ghostty;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_OBJC_BRIDGING_HEADER = Vetty/Sources/App/ghostty-bridging-header.h;
