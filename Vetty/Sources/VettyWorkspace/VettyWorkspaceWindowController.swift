@@ -55,6 +55,20 @@ final class VettyWorkspaceWindowController: BaseTerminalController {
         saveWorkspace()
     }
 
+    override func newSplit(
+        at oldView: Ghostty.SurfaceView,
+        direction: SplitTree<Ghostty.SurfaceView>.NewDirection,
+        baseConfig config: Ghostty.SurfaceConfiguration? = nil
+    ) -> Ghostty.SurfaceView? {
+        let newView = super.newSplit(at: oldView, direction: direction, baseConfig: config)
+        if let newView, newView.pwd == nil {
+            newView.pwd = config?.workingDirectory ?? oldView.pwd
+            persistSelectedRuntimeTree()
+            saveWorkspace()
+        }
+        return newView
+    }
+
     override func windowWillClose(_ notification: Notification) {
         persistSelectedRuntimeTree()
         saveWorkspace()
