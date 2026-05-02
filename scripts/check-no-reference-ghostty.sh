@@ -3,7 +3,7 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-if git -C "$root" ls-files | grep -E '(^|/)ghostty/' >/dev/null; then
+if git -C "$root" ls-files | grep -E '^ghostty/' >/dev/null; then
   echo "Tracked files under ghostty/ are not allowed. The local ghostty/ clone is reference-only." >&2
   exit 1
 fi

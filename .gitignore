@@ -13,4 +13,5 @@ Vetty/build/
 Vetty/Frameworks/GhosttyKit.xcframework/
 Vendor/GhosttySource/zig-out/
 Vendor/GhosttySource/.zig-cache/
+Vendor/GhosttySource/zig-pkg/
 Vendor/GhosttySource/macos/build/

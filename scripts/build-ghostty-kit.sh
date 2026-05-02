@@ -12,9 +12,23 @@ fi
 
 mkdir -p "$out"
 
+zig_bin="${VETTY_ZIG:-}"
+if [[ -z "$zig_bin" && -x /opt/homebrew/opt/zig@0.15/bin/zig ]]; then
+  zig_bin="/opt/homebrew/opt/zig@0.15/bin/zig"
+fi
+if [[ -z "$zig_bin" ]]; then
+  zig_bin="$(command -v zig)"
+fi
+
+if [[ "$("$zig_bin" version)" != "0.15.2" ]]; then
+  echo "GhosttyKit requires Zig 0.15.2. Set VETTY_ZIG=/path/to/zig-0.15.2 or install brew zig@0.15." >&2
+  echo "Found $zig_bin version $("$zig_bin" version)." >&2
+  exit 1
+fi
+
 (
   cd "$vendor"
-  zig build -Demit-xcframework=true -Demit-macos-app=false
+  "$zig_bin" build -Demit-xcframework=true -Demit-macos-app=false -Dxcframework-target=native
 )
 
 rm -rf "$out/GhosttyKit.xcframework"
