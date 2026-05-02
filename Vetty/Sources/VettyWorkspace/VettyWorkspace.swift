@@ -37,8 +37,21 @@ struct VettyWorkspace: Codable, Equatable, Sendable {
     }
 
     @discardableResult
-    mutating func addPlaceholderGroup() -> UUID {
-        addGroup(named: "Group \(groups.count + 1)")
+    mutating func addPlaceholderGroup(
+        workingDirectory: String = FileManager.default.homeDirectoryForCurrentUser.path
+    ) -> UUID {
+        let pane = VettyTerminalPane(workingDirectory: workingDirectory)
+        let tab = VettyWorkspaceTab(
+            name: "Terminal",
+            workingDirectory: workingDirectory,
+            paneTree: .terminal(pane)
+        )
+        let group = VettyWorkspaceGroup(name: "Group \(groups.count + 1)", tabs: [tab])
+
+        groups.append(group)
+        selectedGroupID = group.id
+        selectedTabID = tab.id
+        return group.id
     }
 
     @discardableResult
@@ -97,6 +110,22 @@ struct VettyWorkspace: Codable, Equatable, Sendable {
         let normalized = override?.trimmingCharacters(in: .whitespacesAndNewlines)
         groups[location.groupIndex].tabs[location.tabIndex].titleOverride =
             (normalized?.isEmpty == false) ? normalized : nil
+    }
+
+    @discardableResult
+    mutating func setLastComputedTitle(_ tabID: UUID, to title: String) throws -> Bool {
+        guard let location = tabLocation(for: tabID) else {
+            throw VettyWorkspaceError.tabNotFound(tabID)
+        }
+
+        let normalized = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return false }
+
+        let current = groups[location.groupIndex].tabs[location.tabIndex].lastComputedTitle
+        guard current != normalized else { return false }
+
+        groups[location.groupIndex].tabs[location.tabIndex].lastComputedTitle = normalized
+        return true
     }
 
     mutating func removeGroup(_ groupID: UUID) throws {
@@ -205,12 +234,26 @@ struct VettyWorkspace: Codable, Equatable, Sendable {
 struct VettyWorkspaceGroup: Codable, Equatable, Identifiable, Sendable {
     var id: UUID
     var name: String
+    var isExpanded: Bool
     var tabs: [VettyWorkspaceTab]
 
-    init(id: UUID = UUID(), name: String, tabs: [VettyWorkspaceTab]) {
+    init(id: UUID = UUID(), name: String, isExpanded: Bool = true, tabs: [VettyWorkspaceTab]) {
         self.id = id
         self.name = name
+        self.isExpanded = isExpanded
         self.tabs = tabs
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, isExpanded, tabs
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try c.decode(UUID.self, forKey: .id)
+        self.name = try c.decode(String.self, forKey: .name)
+        self.isExpanded = try c.decodeIfPresent(Bool.self, forKey: .isExpanded) ?? true
+        self.tabs = try c.decode([VettyWorkspaceTab].self, forKey: .tabs)
     }
 }
 
@@ -218,6 +261,7 @@ struct VettyWorkspaceTab: Codable, Equatable, Identifiable, Sendable {
     var id: UUID
     var name: String
     var titleOverride: String?
+    var lastComputedTitle: String?
     var workingDirectory: String
     var paneTree: VettyPaneTree
 
@@ -225,18 +269,20 @@ struct VettyWorkspaceTab: Codable, Equatable, Identifiable, Sendable {
         id: UUID = UUID(),
         name: String,
         titleOverride: String? = nil,
+        lastComputedTitle: String? = nil,
         workingDirectory: String,
         paneTree: VettyPaneTree
     ) {
         self.id = id
         self.name = name
         self.titleOverride = titleOverride
+        self.lastComputedTitle = lastComputedTitle
         self.workingDirectory = workingDirectory
         self.paneTree = paneTree
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, titleOverride, workingDirectory, paneTree
+        case id, name, titleOverride, lastComputedTitle, workingDirectory, paneTree
     }
 
     init(from decoder: Decoder) throws {
@@ -244,8 +290,21 @@ struct VettyWorkspaceTab: Codable, Equatable, Identifiable, Sendable {
         self.id = try c.decode(UUID.self, forKey: .id)
         self.name = try c.decode(String.self, forKey: .name)
         self.titleOverride = try c.decodeIfPresent(String.self, forKey: .titleOverride)
+        self.lastComputedTitle = try c.decodeIfPresent(String.self, forKey: .lastComputedTitle)
         self.workingDirectory = try c.decode(String.self, forKey: .workingDirectory)
         self.paneTree = try c.decode(VettyPaneTree.self, forKey: .paneTree)
+    }
+
+    func displayTitle(liveTitle: String?) -> String {
+        if let override = titleOverride, !override.isEmpty { return override }
+
+        let live = liveTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let live, !live.isEmpty { return live }
+
+        let persisted = lastComputedTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let persisted, !persisted.isEmpty { return persisted }
+
+        return name
     }
 }
 

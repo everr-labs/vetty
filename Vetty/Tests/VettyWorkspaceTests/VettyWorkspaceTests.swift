@@ -92,16 +92,123 @@ struct VettyWorkspaceTests {
     }
 
     @Test
-    func addingPlaceholderGroupUsesNextGroupNameAndSelectsIt() throws {
+    func storePersistsLastComputedTerminalTitle() async throws {
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let fileURL = directory.appendingPathComponent("workspace.json")
+        let store = VettyWorkspaceStore(fileURL: fileURL)
+
+        var workspace = VettyWorkspace.default(workingDirectory: "/Users/dev/project")
+        let tabID = try #require(workspace.selectedTabID)
+
+        try workspace.setLastComputedTitle(tabID, to: "npm test")
+
+        try await store.save(workspace)
+        let loaded = try await store.load()
+
+        #expect(loaded.tab(id: tabID)?.lastComputedTitle == "npm test")
+    }
+
+    @Test
+    func decodingWorkspaceWithoutLastComputedTitleKeepsItNil() throws {
+        let groupID = UUID()
+        let tabID = UUID()
+        let paneID = UUID()
+        let json = """
+        {
+          "groups": [
+            {
+              "id": "\(groupID.uuidString)",
+              "name": "General",
+              "tabs": [
+                {
+                  "id": "\(tabID.uuidString)",
+                  "name": "Terminal",
+                  "workingDirectory": "/Users/dev/project",
+                  "paneTree": {
+                    "kind": "terminal",
+                    "terminal": {
+                      "id": "\(paneID.uuidString)",
+                      "workingDirectory": "/Users/dev/project"
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "selectedGroupID": "\(groupID.uuidString)",
+          "selectedTabID": "\(tabID.uuidString)"
+        }
+        """
+
+        let workspace = try JSONDecoder().decode(VettyWorkspace.self, from: Data(json.utf8))
+
+        #expect(workspace.tab(id: tabID)?.lastComputedTitle == nil)
+    }
+
+    @Test
+    func tabDisplayTitleUsesManualLivePersistedThenDefaultOrder() {
+        let tabID = UUID()
+        let pane = VettyTerminalPane(workingDirectory: "/Users/dev/project")
+        let baseTab = VettyWorkspaceTab(
+            id: tabID,
+            name: "Terminal",
+            lastComputedTitle: "Persisted title",
+            workingDirectory: "/Users/dev/project",
+            paneTree: .terminal(pane)
+        )
+
+        var manuallyNamedTab = baseTab
+        manuallyNamedTab.titleOverride = "Manual title"
+
+        #expect(manuallyNamedTab.displayTitle(liveTitle: "Live title") == "Manual title")
+        #expect(baseTab.displayTitle(liveTitle: "Live title") == "Live title")
+        #expect(baseTab.displayTitle(liveTitle: "   ") == "Persisted title")
+        #expect(baseTab.displayTitle(liveTitle: nil) == "Persisted title")
+
+        let defaultTab = VettyWorkspaceTab(
+            name: "Terminal",
+            workingDirectory: "/Users/dev/project",
+            paneTree: .terminal(pane)
+        )
+
+        #expect(defaultTab.displayTitle(liveTitle: nil) == "Terminal")
+    }
+
+    @Test
+    func blankComputedTitlesDoNotOverwritePreviousUsefulTitle() throws {
+        var workspace = VettyWorkspace.default(workingDirectory: "/Users/dev/project")
+        let tabID = try #require(workspace.selectedTabID)
+
+        try workspace.setLastComputedTitle(tabID, to: "  swift build  ")
+        try workspace.setLastComputedTitle(tabID, to: "   ")
+
+        #expect(workspace.tab(id: tabID)?.lastComputedTitle == "swift build")
+    }
+
+    @Test
+    func addingPlaceholderGroupCreatesSelectedTerminalTab() throws {
         var workspace = VettyWorkspace.default(workingDirectory: "/Users/dev/project")
 
-        let groupID = workspace.addPlaceholderGroup()
+        let groupID = workspace.addPlaceholderGroup(workingDirectory: "/Users/dev/new")
 
         #expect(workspace.groups.map(\.name) == ["General", "Group 2"])
         #expect(workspace.groups[1].id == groupID)
-        #expect(workspace.groups[1].tabs.isEmpty)
+        #expect(workspace.groups[1].tabs.count == 1)
+        #expect(workspace.groups[1].tabs[0].name == "Terminal")
+        #expect(workspace.groups[1].tabs[0].workingDirectory == "/Users/dev/new")
         #expect(workspace.selectedGroupID == groupID)
-        #expect(workspace.selectedTabID == nil)
+        #expect(workspace.selectedTabID == workspace.groups[1].tabs[0].id)
+
+        guard case .terminal(let pane) = workspace.groups[1].tabs[0].paneTree else {
+            Issue.record("Expected the placeholder group to start with one terminal pane")
+            return
+        }
+
+        #expect(pane.workingDirectory == workspace.groups[1].tabs[0].workingDirectory)
     }
 
     @Test

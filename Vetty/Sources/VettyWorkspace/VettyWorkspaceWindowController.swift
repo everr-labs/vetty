@@ -5,13 +5,13 @@ import GhosttyKit
 
 final class VettyWorkspaceWindowController: BaseTerminalController {
     @Published private(set) var workspace: VettyWorkspace
-    @Published fileprivate var expandedGroupIDs: Set<UUID> = []
     @Published fileprivate var liveTabTitles: [UUID: String] = [:]
 
     private let store: VettyWorkspaceStore
     private var runtimeTrees: [UUID: SplitTree<Ghostty.SurfaceView>] = [:]
     private var selectedRuntimeTabID: UUID?
     private var titleCancellables: [UUID: AnyCancellable] = [:]
+    private var pendingWorkspaceSave: DispatchWorkItem?
 
     static var all: [VettyWorkspaceWindowController] {
         NSApplication.shared.windows.compactMap {
@@ -38,7 +38,6 @@ final class VettyWorkspaceWindowController: BaseTerminalController {
         super.init(ghostty, surfaceTree: .init())
 
         normalizeWorkspaceSelection()
-        expandedGroupIDs = Set(workspace.groups.map(\.id))
         configureWindow()
         if let selectedTabID = workspace.selectedTabID {
             selectTab(selectedTabID)
@@ -113,9 +112,9 @@ final class VettyWorkspaceWindowController: BaseTerminalController {
         selectedGroup?.tabs ?? []
     }
 
-    func selectGroup(_ groupID: UUID) {
+    func selectGroup(_ groupID: UUID, focusTerminal: Bool = true) {
         persistSelectedRuntimeTree()
-        expandedGroupIDs.insert(groupID)
+        setGroupExpanded(groupID, true, persist: false)
         workspace.selectedGroupID = groupID
         workspace.selectedTabID = workspace.groups
             .first { $0.id == groupID }?
@@ -124,7 +123,7 @@ final class VettyWorkspaceWindowController: BaseTerminalController {
             .id
 
         if let tabID = workspace.selectedTabID {
-            selectTab(tabID)
+            selectTab(tabID, focusTerminal: focusTerminal)
         } else {
             selectedRuntimeTabID = nil
             surfaceTree = .init()
@@ -133,29 +132,31 @@ final class VettyWorkspaceWindowController: BaseTerminalController {
     }
 
     func isGroupExpanded(_ groupID: UUID) -> Bool {
-        expandedGroupIDs.contains(groupID)
+        workspace.groups.first { $0.id == groupID }?.isExpanded ?? false
     }
 
     func toggleGroup(_ groupID: UUID) {
+        guard let groupIndex = workspace.groups.firstIndex(where: { $0.id == groupID }) else { return }
         workspace.selectedGroupID = groupID
-
-        if expandedGroupIDs.contains(groupID) {
-            expandedGroupIDs.remove(groupID)
-        } else {
-            expandedGroupIDs.insert(groupID)
-        }
-
+        workspace.groups[groupIndex].isExpanded.toggle()
         saveWorkspace()
     }
 
-    func selectTab(_ tabID: UUID) {
+    func setGroupExpanded(_ groupID: UUID, _ expanded: Bool, persist: Bool = true) {
+        guard let groupIndex = workspace.groups.firstIndex(where: { $0.id == groupID }) else { return }
+        guard workspace.groups[groupIndex].isExpanded != expanded else { return }
+        workspace.groups[groupIndex].isExpanded = expanded
+        if persist { saveWorkspace() }
+    }
+
+    func selectTab(_ tabID: UUID, focusTerminal: Bool = true) {
         persistSelectedRuntimeTree()
         guard let tab = workspace.tab(id: tabID) else { return }
 
         workspace.selectedTabID = tabID
         if let group = workspace.groups.first(where: { $0.tabs.contains(where: { $0.id == tabID }) }) {
             workspace.selectedGroupID = group.id
-            expandedGroupIDs.insert(group.id)
+            setGroupExpanded(group.id, true, persist: false)
         }
 
         selectedRuntimeTabID = tabID
@@ -165,44 +166,54 @@ final class VettyWorkspaceWindowController: BaseTerminalController {
         surfaceTree = tree
         window?.title = displayTitle(for: tab)
 
-        if let firstSurface = tree.firstSurface {
+        if focusTerminal, let firstSurface = tree.firstSurface {
             focusSurface(firstSurface)
         }
         saveWorkspace()
     }
 
     func displayTitle(for tab: VettyWorkspaceTab) -> String {
-        if let override = tab.titleOverride, !override.isEmpty { return override }
-        if let live = liveTabTitles[tab.id], !live.isEmpty { return live }
-        return tab.name
+        tab.displayTitle(liveTitle: liveTabTitles[tab.id])
     }
 
     private func installTitleSubscription(for tabID: UUID, tree: SplitTree<Ghostty.SurfaceView>) {
         titleCancellables[tabID]?.cancel()
         guard let firstSurface = tree.firstSurface else {
             liveTabTitles.removeValue(forKey: tabID)
+            refreshWindowTitleIfNeeded(for: tabID)
             return
         }
 
-        let initial = firstSurface.title
-        if !initial.isEmpty {
-            liveTabTitles[tabID] = initial
-        } else {
-            liveTabTitles.removeValue(forKey: tabID)
-        }
-        refreshWindowTitleIfNeeded(for: tabID)
+        updateComputedTitle(firstSurface.title, for: tabID)
 
         titleCancellables[tabID] = firstSurface.$title
             .receive(on: DispatchQueue.main)
             .sink { [weak self] newTitle in
                 guard let self else { return }
-                if newTitle.isEmpty {
-                    self.liveTabTitles.removeValue(forKey: tabID)
-                } else {
-                    self.liveTabTitles[tabID] = newTitle
-                }
-                self.refreshWindowTitleIfNeeded(for: tabID)
+                self.updateComputedTitle(newTitle, for: tabID)
             }
+    }
+
+    private func updateComputedTitle(_ rawTitle: String, for tabID: UUID) {
+        let title = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !title.isEmpty else {
+            liveTabTitles.removeValue(forKey: tabID)
+            refreshWindowTitleIfNeeded(for: tabID)
+            return
+        }
+
+        liveTabTitles[tabID] = title
+
+        do {
+            if try workspace.setLastComputedTitle(tabID, to: title) {
+                scheduleWorkspaceSave()
+            }
+        } catch {
+            Ghostty.logger.error("failed to store Vetty terminal title: \(String(describing: error))")
+        }
+
+        refreshWindowTitleIfNeeded(for: tabID)
     }
 
     private func refreshWindowTitleIfNeeded(for tabID: UUID) {
@@ -212,9 +223,11 @@ final class VettyWorkspaceWindowController: BaseTerminalController {
 
     @discardableResult
     func addPlaceholderGroup() -> UUID {
-        let groupID = workspace.addPlaceholderGroup()
-        expandedGroupIDs.insert(groupID)
-        selectGroup(groupID)
+        let workingDirectory = focusedSurface?.pwd
+            ?? workspace.tab(id: workspace.selectedTabID ?? UUID())?.workingDirectory
+            ?? FileManager.default.homeDirectoryForCurrentUser.path
+        let groupID = workspace.addPlaceholderGroup(workingDirectory: workingDirectory)
+        selectGroup(groupID, focusTerminal: false)
         return groupID
     }
 
@@ -231,7 +244,7 @@ final class VettyWorkspaceWindowController: BaseTerminalController {
             .last?
             .workingDirectory
 
-        expandedGroupIDs.insert(groupID)
+        setGroupExpanded(groupID, true, persist: false)
         workspace.selectedGroupID = groupID
 
         let workingDirectory = baseConfig?.workingDirectory
@@ -351,8 +364,6 @@ final class VettyWorkspaceWindowController: BaseTerminalController {
             liveTabTitles.removeValue(forKey: tabID)
         }
 
-        expandedGroupIDs.remove(groupID)
-
         do {
             try workspace.removeGroup(groupID)
             showWorkspaceSelectionAfterRemoval(wasSelected: wasSelected)
@@ -387,7 +398,7 @@ final class VettyWorkspaceWindowController: BaseTerminalController {
         }
 
         if let selectedGroupID = workspace.selectedGroupID {
-            expandedGroupIDs.insert(selectedGroupID)
+            setGroupExpanded(selectedGroupID, true, persist: false)
         }
 
         if let selectedTabID = workspace.selectedTabID {
@@ -514,7 +525,22 @@ final class VettyWorkspaceWindowController: BaseTerminalController {
         syncWorkspacePaneTree(for: selectedRuntimeTabID, from: surfaceTree)
     }
 
+    private func scheduleWorkspaceSave() {
+        pendingWorkspaceSave?.cancel()
+
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.pendingWorkspaceSave = nil
+            self.saveWorkspace()
+        }
+        pendingWorkspaceSave = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(500), execute: workItem)
+    }
+
     private func saveWorkspace() {
+        pendingWorkspaceSave?.cancel()
+        pendingWorkspaceSave = nil
+
         do {
             try store.saveSync(workspace)
         } catch {
@@ -576,6 +602,10 @@ private struct VettyWorkspaceSidebar: View {
                                         endEdit: { editingTabID = nil }
                                     )
                                 }
+                                .transition(
+                                    .opacity.animation(.easeOut(duration: 0.1))
+                                    .combined(with: .offset(CGSize(width: 0, height: -4)))
+                                )
                             }
                         }
                     }
@@ -613,7 +643,7 @@ private struct VettyWorkspaceSidebar: View {
 
 private struct VettyWorkspaceGroupRow: View {
     let group: VettyWorkspaceGroup
-    @ObservedObject var controller: VettyWorkspaceWindowController
+    let controller: VettyWorkspaceWindowController
     let isEditing: Bool
     let beginEdit: () -> Void
     let endEdit: () -> Void
@@ -642,6 +672,9 @@ private struct VettyWorkspaceGroupRow: View {
                             draftName = group.name
                             DispatchQueue.main.async {
                                 isFieldFocused = true
+                                DispatchQueue.main.async {
+                                    (NSApp.keyWindow?.firstResponder as? NSText)?.selectAll(nil)
+                                }
                             }
                         }
                         .onChange(of: isFieldFocused) { focused in
@@ -656,25 +689,34 @@ private struct VettyWorkspaceGroupRow: View {
             }
             .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
             .contentShape(Rectangle())
-            .onTapGesture(count: 2) {
+            .onTapGesture {
                 guard !isEditing else { return }
-                beginEdit()
-            }
-            .onTapGesture(count: 1) {
-                guard !isEditing else { return }
-                controller.toggleGroup(group.id)
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
+                    controller.toggleGroup(group.id)
+                }
             }
 
-            Button {
-                controller.addTab(toGroup: group.id)
-            } label: {
-                Image(systemName: "apple.terminal")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(secondaryText)
-                    .frame(width: 20, height: 24)
+            if isEditing {
+                Button(action: commitEdit) {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(secondaryText)
+                        .frame(width: 20, height: 24)
+                }
+                .buttonStyle(.plain)
+                .help("Confirm name")
+            } else {
+                Button {
+                    controller.addTab(toGroup: group.id)
+                } label: {
+                    Image(systemName: "apple.terminal")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(secondaryText)
+                        .frame(width: 20, height: 24)
+                }
+                .buttonStyle(.plain)
+                .help("New tab in \(group.name)")
             }
-            .buttonStyle(.plain)
-            .help("New tab in \(group.name)")
         }
         .padding(.leading, 8)
         .padding(.trailing, 3)
@@ -697,7 +739,7 @@ private struct VettyWorkspaceGroupRow: View {
 
 private struct VettyWorkspaceTabRow: View {
     let tab: VettyWorkspaceTab
-    @ObservedObject var controller: VettyWorkspaceWindowController
+    let controller: VettyWorkspaceWindowController
     let isEditing: Bool
     let beginEdit: () -> Void
     let endEdit: () -> Void
@@ -731,6 +773,9 @@ private struct VettyWorkspaceTabRow: View {
                             draftName = tab.titleOverride ?? displayTitle
                             DispatchQueue.main.async {
                                 isFieldFocused = true
+                                DispatchQueue.main.async {
+                                    (NSApp.keyWindow?.firstResponder as? NSText)?.selectAll(nil)
+                                }
                             }
                         }
                         .onChange(of: isFieldFocused) { focused in
@@ -747,28 +792,36 @@ private struct VettyWorkspaceTabRow: View {
             }
             .frame(maxWidth: .infinity, minHeight: 31, alignment: .leading)
             .contentShape(Rectangle())
-            .onTapGesture(count: 2) {
-                guard !isEditing else { return }
-                beginEdit()
-            }
-            .onTapGesture(count: 1) {
+            .onTapGesture {
                 guard !isEditing else { return }
                 controller.selectTab(tab.id)
             }
 
-            Button {
-                controller.closeTab(tab.id)
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(secondaryText)
-                    .frame(width: 18, height: 28)
-                    .contentShape(Rectangle())
+            if isEditing {
+                Button(action: commitEdit) {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(secondaryText)
+                        .frame(width: 18, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Confirm name")
+            } else {
+                Button {
+                    controller.closeTab(tab.id)
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(secondaryText)
+                        .frame(width: 18, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Close \(tab.name)")
+                .opacity(showClose ? 1 : 0)
+                .onHover { isCloseHovered = $0 }
             }
-            .buttonStyle(.plain)
-            .help("Close \(tab.name)")
-            .opacity(showClose ? 1 : 0)
-            .onHover { isCloseHovered = $0 }
         }
         .padding(.leading, 31)
         .padding(.trailing, 6)
