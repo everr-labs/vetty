@@ -1,11 +1,13 @@
 import AppKit
 import Combine
 import SwiftUI
+import UniformTypeIdentifiers
 import GhosttyKit
 
 final class VettyWorkspaceWindowController: BaseTerminalController {
     @Published private(set) var workspace: VettyWorkspace
     @Published fileprivate var liveTabTitles: [UUID: String] = [:]
+    @Published fileprivate var draggingPayload: VettyDragPayload?
 
     private let store: VettyWorkspaceStore
     private var runtimeTrees: [UUID: SplitTree<Ghostty.SurfaceView>] = [:]
@@ -274,6 +276,41 @@ final class VettyWorkspaceWindowController: BaseTerminalController {
         } catch {
             presentError(error)
         }
+    }
+
+    func moveTab(_ tabID: UUID, toIndex: Int) {
+        do {
+            try workspace.moveTab(tabID, toIndex: toIndex)
+            saveWorkspace()
+        } catch {
+            presentError(error)
+        }
+    }
+
+    func moveGroup(_ groupID: UUID, toIndex: Int) {
+        do {
+            try workspace.moveGroup(groupID, toIndex: toIndex)
+            saveWorkspace()
+        } catch {
+            presentError(error)
+        }
+    }
+
+    func groupID(for tabID: UUID) -> UUID? {
+        workspace.groups.first { $0.tabs.contains { $0.id == tabID } }?.id
+    }
+
+    func tabIndex(for tabID: UUID) -> (groupID: UUID, index: Int)? {
+        for group in workspace.groups {
+            if let i = group.tabs.firstIndex(where: { $0.id == tabID }) {
+                return (group.id, i)
+            }
+        }
+        return nil
+    }
+
+    func groupIndex(for groupID: UUID) -> Int? {
+        workspace.groups.firstIndex { $0.id == groupID }
     }
 
     func renameGroup(_ groupID: UUID, to name: String) {
@@ -569,6 +606,116 @@ private struct VettyWorkspaceRootView: View {
     }
 }
 
+fileprivate enum VettyDragPayload: Equatable {
+    case tab(groupID: UUID, tabID: UUID)
+    case group(UUID)
+
+    var encoded: String {
+        switch self {
+        case .tab(let groupID, let tabID): return "tab:\(groupID.uuidString):\(tabID.uuidString)"
+        case .group(let groupID): return "group:\(groupID.uuidString)"
+        }
+    }
+
+    init?(_ string: String) {
+        let parts = string.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false)
+        if parts.count == 3, parts[0] == "tab",
+           let groupID = UUID(uuidString: String(parts[1])),
+           let tabID = UUID(uuidString: String(parts[2])) {
+            self = .tab(groupID: groupID, tabID: tabID)
+        } else if parts.count == 2, parts[0] == "group",
+                  let groupID = UUID(uuidString: String(parts[1])) {
+            self = .group(groupID)
+        } else {
+            return nil
+        }
+    }
+}
+
+fileprivate struct TabDropDelegate: DropDelegate {
+    let targetTabID: UUID
+    let groupID: UUID
+    let controller: VettyWorkspaceWindowController
+    let approxRowHeight: CGFloat
+
+    private func sourceTabID() -> UUID? {
+        guard case .tab(let sourceGroupID, let sourceTabID) = controller.draggingPayload,
+              sourceGroupID == groupID else { return nil }
+        return sourceTabID
+    }
+
+    func validateDrop(info: DropInfo) -> Bool {
+        sourceTabID() != nil
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        guard let sourceTabID = sourceTabID() else {
+            return DropProposal(operation: .forbidden)
+        }
+        guard sourceTabID != targetTabID,
+              let targetIndex = controller.tabIndex(for: targetTabID)?.index,
+              let sourceIndex = controller.tabIndex(for: sourceTabID)?.index else {
+            return DropProposal(operation: .move)
+        }
+        let insertBefore = info.location.y < approxRowHeight / 2
+        let destination = insertBefore ? targetIndex : targetIndex + 1
+        let finalIndex = sourceIndex < destination ? destination - 1 : destination
+        guard finalIndex != sourceIndex else {
+            return DropProposal(operation: .move)
+        }
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
+            controller.moveTab(sourceTabID, toIndex: destination)
+        }
+        return DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        controller.draggingPayload = nil
+        return true
+    }
+}
+
+fileprivate struct GroupDropDelegate: DropDelegate {
+    let targetGroupID: UUID
+    let controller: VettyWorkspaceWindowController
+    let approxRowHeight: CGFloat
+
+    private func sourceGroupID() -> UUID? {
+        guard case .group(let id) = controller.draggingPayload else { return nil }
+        return id
+    }
+
+    func validateDrop(info: DropInfo) -> Bool {
+        sourceGroupID() != nil
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        guard let sourceGroupID = sourceGroupID() else {
+            return DropProposal(operation: .forbidden)
+        }
+        guard sourceGroupID != targetGroupID,
+              let targetIndex = controller.groupIndex(for: targetGroupID),
+              let sourceIndex = controller.groupIndex(for: sourceGroupID) else {
+            return DropProposal(operation: .move)
+        }
+        let insertBefore = info.location.y < approxRowHeight / 2
+        let destination = insertBefore ? targetIndex : targetIndex + 1
+        let finalIndex = sourceIndex < destination ? destination - 1 : destination
+        guard finalIndex != sourceIndex else {
+            return DropProposal(operation: .move)
+        }
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
+            controller.moveGroup(sourceGroupID, toIndex: destination)
+        }
+        return DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        controller.draggingPayload = nil
+        return true
+    }
+}
+
 private struct VettyWorkspaceSidebar: View {
     @ObservedObject var controller: VettyWorkspaceWindowController
     @State private var editingGroupID: UUID?
@@ -596,6 +743,7 @@ private struct VettyWorkspaceSidebar: View {
                                 ForEach(group.tabs) { tab in
                                     VettyWorkspaceTabRow(
                                         tab: tab,
+                                        groupID: group.id,
                                         controller: controller,
                                         isEditing: editingTabID == tab.id,
                                         beginEdit: { editingTabID = tab.id },
@@ -652,6 +800,7 @@ private struct VettyWorkspaceGroupRow: View {
     @FocusState private var isFieldFocused: Bool
 
     private let secondaryText = Color(red: 0.58, green: 0.58, blue: 0.58)
+    private let approxRowHeight: CGFloat = 30
 
     var body: some View {
         HStack(spacing: 4) {
@@ -722,9 +871,18 @@ private struct VettyWorkspaceGroupRow: View {
         .padding(.trailing, 3)
         .padding(.top, 2)
         .contextMenu {
-            Button("Rename Group") { beginEdit() }
-            Button("Close Group") { controller.closeGroup(group.id) }
+            Button("Rename workspace") { beginEdit() }
+            Button("Delete workspace") { controller.closeGroup(group.id) }
         }
+        .onDrag {
+            controller.draggingPayload = .group(group.id)
+            return NSItemProvider(object: VettyDragPayload.group(group.id).encoded as NSString)
+        }
+        .onDrop(of: [.text], delegate: GroupDropDelegate(
+            targetGroupID: group.id,
+            controller: controller,
+            approxRowHeight: approxRowHeight
+        ))
     }
 
     private func commitEdit() {
@@ -739,6 +897,7 @@ private struct VettyWorkspaceGroupRow: View {
 
 private struct VettyWorkspaceTabRow: View {
     let tab: VettyWorkspaceTab
+    let groupID: UUID
     let controller: VettyWorkspaceWindowController
     let isEditing: Bool
     let beginEdit: () -> Void
@@ -752,6 +911,7 @@ private struct VettyWorkspaceTabRow: View {
     private let selectedBackground = Color(red: 0.24, green: 0.24, blue: 0.24)
     private let primaryText = Color(red: 0.86, green: 0.86, blue: 0.86)
     private let secondaryText = Color(red: 0.58, green: 0.58, blue: 0.58)
+    private let approxRowHeight: CGFloat = 31
 
     private var showClose: Bool { isRowHovered || isCloseHovered }
 
@@ -833,6 +993,16 @@ private struct VettyWorkspaceTabRow: View {
             Button("Rename Tab") { beginEdit() }
             Button("Close Tab") { controller.closeTab(tab.id) }
         }
+        .onDrag {
+            controller.draggingPayload = .tab(groupID: groupID, tabID: tab.id)
+            return NSItemProvider(object: VettyDragPayload.tab(groupID: groupID, tabID: tab.id).encoded as NSString)
+        }
+        .onDrop(of: [.text], delegate: TabDropDelegate(
+            targetTabID: tab.id,
+            groupID: groupID,
+            controller: controller,
+            approxRowHeight: approxRowHeight
+        ))
     }
 
     private func commitEdit() {

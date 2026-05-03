@@ -86,6 +86,39 @@ struct VettyWorkspace: Codable, Equatable, Sendable {
         return nil
     }
 
+    mutating func moveTab(_ tabID: UUID, toIndex destinationIndex: Int) throws {
+        guard let location = tabLocation(for: tabID) else {
+            throw VettyWorkspaceError.tabNotFound(tabID)
+        }
+
+        let count = groups[location.groupIndex].tabs.count
+        let clampedDestination = max(0, min(destinationIndex, count))
+
+        if clampedDestination == location.tabIndex || clampedDestination == location.tabIndex + 1 {
+            return
+        }
+
+        let tab = groups[location.groupIndex].tabs.remove(at: location.tabIndex)
+        let adjustedIndex = location.tabIndex < clampedDestination ? clampedDestination - 1 : clampedDestination
+        groups[location.groupIndex].tabs.insert(tab, at: adjustedIndex)
+    }
+
+    mutating func moveGroup(_ groupID: UUID, toIndex destinationIndex: Int) throws {
+        guard let sourceIndex = groups.firstIndex(where: { $0.id == groupID }) else {
+            throw VettyWorkspaceError.groupNotFound(groupID)
+        }
+
+        let clampedDestination = max(0, min(destinationIndex, groups.count))
+
+        if clampedDestination == sourceIndex || clampedDestination == sourceIndex + 1 {
+            return
+        }
+
+        let group = groups.remove(at: sourceIndex)
+        let adjustedIndex = sourceIndex < clampedDestination ? clampedDestination - 1 : clampedDestination
+        groups.insert(group, at: adjustedIndex)
+    }
+
     mutating func renameGroup(_ groupID: UUID, to name: String) throws {
         guard let groupIndex = groups.firstIndex(where: { $0.id == groupID }) else {
             throw VettyWorkspaceError.groupNotFound(groupID)
