@@ -21,6 +21,23 @@ final_zip="$release_dir/Vetty-notarized.zip"
 verify_dir="$release_dir/verify-final-zip"
 
 xcode_path="/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin"
+metadata_entry_pattern='(^|/)(__MACOSX|\.DS_Store|\._)'
+
+create_zip_without_macos_metadata() {
+  local source_path="$1"
+  local zip_path="$2"
+
+  # Resource forks and extended metadata become ._ AppleDouble files in zip
+  # archives. Those files can break nested code signatures when users extract
+  # with common non-ditto unzip tools.
+  DITTONORSRC=1 ditto -c -k --norsrc --keepParent "$source_path" "$zip_path"
+
+  if zipinfo -1 "$zip_path" | /usr/bin/grep -Eq "$metadata_entry_pattern"; then
+    echo "Zip contains macOS metadata files that can invalidate code signatures:" >&2
+    zipinfo -1 "$zip_path" | /usr/bin/grep -E "$metadata_entry_pattern" | sed -n '1,40p' >&2
+    exit 1
+  fi
+}
 
 if [[ ! -d "$ghostty_kit" ]]; then
   echo "Missing Vetty/Frameworks/GhosttyKit.xcframework." >&2
@@ -84,7 +101,7 @@ echo "Verifying Developer ID signature..."
 codesign --verify --deep --strict --verbose=2 "$app_path"
 
 echo "Creating notarization upload zip..."
-ditto -c -k --keepParent "$app_path" "$notary_upload_zip"
+create_zip_without_macos_metadata "$app_path" "$notary_upload_zip"
 
 echo "Submitting app for notarization..."
 xcrun notarytool submit "$notary_upload_zip" \
@@ -109,11 +126,11 @@ xcrun stapler staple "$app_path"
 xcrun stapler validate "$app_path"
 
 echo "Creating final notarized zip..."
-ditto -c -k --keepParent "$app_path" "$final_zip"
+create_zip_without_macos_metadata "$app_path" "$final_zip"
 
 echo "Verifying final zip contents..."
 mkdir -p "$verify_dir"
-ditto -x -k "$final_zip" "$verify_dir"
+/usr/bin/unzip -q "$final_zip" -d "$verify_dir"
 xcrun stapler validate "$verify_dir/Vetty.app"
 codesign --verify --deep --strict --verbose=2 "$verify_dir/Vetty.app"
 
