@@ -1,57 +1,83 @@
 # Vetty
 
-A macOS terminal that keeps Ghostty intact and adds a left sidebar for organizing tabs into workspaces and tab groups.
+A macOS terminal built on Ghostty with a sidebar for organizing terminals into groups.
 
 ![Vetty screenshot](screenshot.png)
 
 ## What it is
 
-Vetty wraps [Ghostty](https://ghostty.org/) — its rendering, input, shell handling, command palette, splits, search, and settings are all the upstream project. On top of that, Vetty adds one thing: a sidebar that lets you group related Ghostty tabs together.
+Vetty embeds [Ghostty](https://ghostty.org/) (via the vendored `GhosttyKit.xcframework`) and wraps it in a workspace window. Rendering, input, splits, the command palette, font controls, and shell handling all come from Ghostty. Vetty adds a single thing on top: a 244pt left sidebar that organizes terminals into **groups → tabs → panes**.
+
+- **Groups** are top-level rows in the sidebar. Each one collapses/expands and can be renamed.
+- **Tabs** sit inside a group. Each tab owns its own working directory and a pane tree.
+- **Panes** can be split horizontally or vertically, recursively, inside a tab.
+
+Both groups and tabs can be drag-and-drop reordered. Groups can also be renamed inline.
+
+## Tab titles
+
+Each tab's display title falls back through three sources:
+
+1. A manual override you set via the sidebar.
+2. The live title reported by the shell/program running in the first pane.
+3. The last non-empty title Vetty observed (persisted across launches).
+
+## State persistence
+
+The full workspace — groups, tabs, expanded/collapsed state, selection, pane trees, working directories, tab titles — is serialized as JSON to:
 
 ```
-Workspace
-└── Tab group
-    └── Ghostty tabs
+~/Library/Application Support/Vetty/workspace.json
 ```
 
-Use a workspace per project, a tab group per task (e.g. *"Claude Code"*, *"Continue Reviews"*), and let Ghostty handle everything inside the tab.
+On launch Vetty restores from that file. If it's missing or empty, you get one group ("General") with one terminal in your home directory.
 
-If you hide the sidebar, Vetty behaves like a stock Ghostty build.
+## Window
 
-## Why use it
+- Default size: 1120 × 720
+- Minimum size: 760 × 460
+- macOS-native tabbing is disabled — Vetty's sidebar is the tab UI.
 
-- **Project-scoped terminals.** A workspace per repo keeps shells, working directories, and tabs separate without juggling Ghostty windows.
-- **Task-scoped tab groups.** Group the four tabs you opened for a single bug fix, collapse them when you're done, reopen later.
-- **Ghostty underneath.** No fork of the terminal model, no second renderer — upstream Ghostty improvements flow in.
-- **Native macOS app.** Signed, notarized, hardened-runtime, and distributed as a DMG.
+## Requirements
+
+- macOS 13.0 (Ventura) or later
+- Bundle ID: `com.guidodorsi.vetty`
+
+Vetty ships with Sparkle for auto-updates and registers for user notifications (used for dock badging).
 
 ## Install
 
 Download the latest `.dmg` from the [Releases page](https://github.com/gdorsi/vetty/releases), open it, and drag `Vetty.app` into `/Applications`.
 
-The first launch may take a moment while macOS verifies the notarization ticket.
+## File handling
 
-## Requirements
-
-- macOS 14 (Sonoma) or later
-- Apple Silicon
-
-## Configuration
-
-Vetty reads the same configuration as Ghostty (`~/.config/ghostty/config`). Fonts, themes, keybindings, and shell integration all work the same way — see the [Ghostty documentation](https://ghostty.org/docs).
-
-Sidebar state (workspaces, tab groups, order, selection) is stored separately by Vetty and persists across launches.
+Vetty registers as a handler for shell scripts (`.command`, `.tool`, `.sh`, `.zsh`, `.csh`, `.pl`), folders, and Unix executables, so you can open them directly from Finder.
 
 ## Building from source
 
+Vetty has three build scripts under `scripts/`:
+
 ```bash
-git clone https://github.com/gdorsi/vetty.git
-cd vetty
+# 1. Build the vendored Ghostty into an xcframework (only needed once,
+#    or when ghostty/ changes)
+./scripts/build-ghostty-kit.sh
+
+# 2. Local debug build
 ./scripts/build-vetty-debug.sh
+
+# 3. Signed + notarized release DMG (requires Developer ID, notary profile)
+./scripts/build-vetty-release.sh
 ```
 
-The debug script produces an unsigned `Vetty.app` under `build/`. For signed/notarized release builds, see `scripts/build-vetty-release.sh` — it documents the required environment (signing identity, notary profile, team ID).
+The release script signs every binary manually with `codesign`, submits the bundle to `notarytool`, staples the ticket, and packages a notarized DMG. Required environment variables are documented at the top of `scripts/build-vetty-release.sh`.
 
-## License
+## Layout
 
-Ghostty is vendored under its original license — see `ghostty/LICENSE`. Vetty's own sources follow the same terms.
+```
+Vetty/Sources/
+├── App/                  # AppDelegate, main, Ghostty wiring
+├── VettyWorkspace/       # Sidebar UI + workspace model/persistence
+└── GhosttyDerived/       # Glue code adapted from Ghostty's macOS app
+ghostty/                  # Vendored Ghostty source
+scripts/                  # Build, sign, notarize, package
+```
