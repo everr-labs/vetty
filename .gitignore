@@ -6,6 +6,10 @@ DerivedData/
 *.xcuserstate
 xcuserdata/
 
+# Local secrets / signing config
+.env
+.env.local
+
 # Build outputs
 /.build/
 /build/
