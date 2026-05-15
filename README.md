@@ -2,7 +2,15 @@
 
 A macOS terminal built on Ghostty with a sidebar for organizing terminals into groups.
 
+> ⚠️ Vetty is still in heavy development. Things will break, change, or move without warning.
+
 ![Vetty screenshot](screenshot.png)
+
+## Why
+
+I built Vetty because I work across multiple projects at the same time, with several terminal sessions open in each, and I want all of them accessible immediately — no hunting through windows or rebuilding context.
+
+I tried other vertical-tab terminals first, but none of them gave me what I actually wanted: a **project + session** structure, with multiple **panes inside each session**. So I built one.
 
 ## What it is
 
@@ -42,8 +50,6 @@ On launch Vetty restores from that file. If it's missing or empty, you get one g
 
 - macOS 13.0 (Ventura) or later
 - Bundle ID: `com.guidodorsi.vetty`
-
-Vetty ships with Sparkle for auto-updates and registers for user notifications (used for dock badging).
 
 ## Install
 
